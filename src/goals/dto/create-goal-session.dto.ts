@@ -1,4 +1,10 @@
-import { IsString, IsNumber, IsDateString, IsOptional, Min } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsDateString,
+  IsOptional,
+  Min,
+} from "class-validator";
 
 export class CreateGoalSessionDto {
   @IsString()

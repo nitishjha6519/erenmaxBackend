@@ -1,24 +1,32 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { User, UserDocument } from './schemas/user.schema';
-import { TrustScoreLog, TrustScoreLogDocument } from './schemas/trust-score-log.schema';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { Session, SessionDocument } from '../sessions/schemas/session.schema';
-import { Application, ApplicationDocument } from '../applications/schemas/application.schema';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model, Types } from "mongoose";
+import { User, UserDocument } from "./schemas/user.schema";
+import {
+  TrustScoreLog,
+  TrustScoreLogDocument,
+} from "./schemas/trust-score-log.schema";
+import { UpdateUserDto } from "./dto/update-user.dto";
+import { Session, SessionDocument } from "../sessions/schemas/session.schema";
+import {
+  Application,
+  ApplicationDocument,
+} from "../applications/schemas/application.schema";
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
-    @InjectModel(TrustScoreLog.name) private trustLogModel: Model<TrustScoreLogDocument>,
+    @InjectModel(TrustScoreLog.name)
+    private trustLogModel: Model<TrustScoreLogDocument>,
     @InjectModel(Session.name) private sessionModel: Model<SessionDocument>,
-    @InjectModel(Application.name) private applicationModel: Model<ApplicationDocument>,
+    @InjectModel(Application.name)
+    private applicationModel: Model<ApplicationDocument>,
   ) {}
 
   async getPublicProfile(userId: string) {
     const user = await this.userModel.findById(userId);
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException("User not found");
     return {
       user: {
         id: user._id,
@@ -52,17 +60,28 @@ export class UsersService {
     weekStart.setHours(0, 0, 0, 0);
 
     const sessionsThisWeek = await this.sessionModel.countDocuments({
-      $or: [{ goalOwnerId: userId }, { approvedHelperId: userId }, { partnerId: userId }],
-      status: 'completed',
+      $or: [
+        { goalOwnerId: userId },
+        { approvedHelperId: userId },
+        { partnerId: userId },
+      ],
+      status: "completed",
       completedAt: { $gte: weekStart },
     });
 
     const allSessions = await this.sessionModel.find({
-      $or: [{ goalOwnerId: userId }, { approvedHelperId: userId }, { partnerId: userId }],
-      status: 'completed',
+      $or: [
+        { goalOwnerId: userId },
+        { approvedHelperId: userId },
+        { partnerId: userId },
+      ],
+      status: "completed",
     });
 
-    const totalMinutes = allSessions.reduce((sum, s) => sum + (s.duration || 0), 0);
+    const totalMinutes = allSessions.reduce(
+      (sum, s) => sum + (s.duration || 0),
+      0,
+    );
     const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
 
     const ratings = allSessions
@@ -73,10 +92,12 @@ export class UsersService {
       .filter((r) => r != null);
     const avgRating =
       ratings.length > 0
-        ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
+        ? Math.round(
+            (ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10,
+          ) / 10
         : 0;
 
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const weeklyMap: Record<string, number> = {};
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
@@ -89,13 +110,32 @@ export class UsersService {
         if (weeklyMap[day] !== undefined) weeklyMap[day]++;
       }
     }
-    const weeklyActivity = Object.entries(weeklyMap).map(([day, sessions]) => ({ day, sessions }));
+    const weeklyActivity = Object.entries(weeklyMap).map(([day, sessions]) => ({
+      day,
+      sessions,
+    }));
 
     const categoryAgg = await this.sessionModel.aggregate([
-      { $match: { $or: [{ goalOwnerId: userId }, { approvedHelperId: userId }, { partnerId: userId }], status: 'completed' } },
-      { $lookup: { from: 'goals', localField: 'goalId', foreignField: '_id', as: 'goal' } },
-      { $unwind: '$goal' },
-      { $group: { _id: '$goal.category', count: { $sum: 1 } } },
+      {
+        $match: {
+          $or: [
+            { goalOwnerId: userId },
+            { approvedHelperId: userId },
+            { partnerId: userId },
+          ],
+          status: "completed",
+        },
+      },
+      {
+        $lookup: {
+          from: "goals",
+          localField: "goalId",
+          foreignField: "_id",
+          as: "goal",
+        },
+      },
+      { $unwind: "$goal" },
+      { $group: { _id: "$goal.category", count: { $sum: 1 } } },
     ]);
     const categoryBreakdown = categoryAgg.map((c) => ({
       category: c._id,
@@ -104,8 +144,8 @@ export class UsersService {
 
     // Points locked in pending applications
     const stakedResult = await this.applicationModel.aggregate([
-      { $match: { applicantId: userId, status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$stakedPoints' } } },
+      { $match: { applicantId: userId, status: "pending" } },
+      { $group: { _id: null, total: { $sum: "$stakedPoints" } } },
     ]);
     const stakedPoints = stakedResult.length > 0 ? stakedResult[0].total : 0;
 
@@ -117,10 +157,12 @@ export class UsersService {
     let missedPenalty = 0;
     let missedCount = 0;
     for (const log of trustLogs) {
-      if (log.action === 'session_completed') sessionsPoints += log.pointsChange;
-      else if (log.action === 'good_feedback') feedbackPoints += log.pointsChange;
-      else if (log.action === 'streak_bonus') streakPoints += log.pointsChange;
-      else if (log.action === 'no_show' || log.action === 'late_cancel') {
+      if (log.action === "session_completed")
+        sessionsPoints += log.pointsChange;
+      else if (log.action === "good_feedback")
+        feedbackPoints += log.pointsChange;
+      else if (log.action === "streak_bonus") streakPoints += log.pointsChange;
+      else if (log.action === "no_show" || log.action === "late_cancel") {
         missedPenalty += log.pointsChange;
         missedCount++;
       }
@@ -185,13 +227,24 @@ export class UsersService {
     const streak = user.streak || 0;
 
     const allSessions = await this.sessionModel.find({
-      $or: [{ goalOwnerId: userId }, { approvedHelperId: userId }, { partnerId: userId }],
-      status: 'completed',
+      $or: [
+        { goalOwnerId: userId },
+        { approvedHelperId: userId },
+        { partnerId: userId },
+      ],
+      status: "completed",
     });
     const ratings = allSessions
-      .map((s) => (s.goalOwnerId.toString() === userId.toString() ? s.goalOwnerRating : s.partnerRating))
+      .map((s) =>
+        s.goalOwnerId.toString() === userId.toString()
+          ? s.goalOwnerRating
+          : s.partnerRating,
+      )
       .filter((r) => r != null);
-    const avgRating = ratings.length > 0 ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
+    const avgRating =
+      ratings.length > 0
+        ? ratings.reduce((a, b) => a + b, 0) / ratings.length
+        : 0;
 
     const trustScore = Math.min(
       100,

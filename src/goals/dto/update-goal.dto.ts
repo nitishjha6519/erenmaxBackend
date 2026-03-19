@@ -1,4 +1,11 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsEnum, Min } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsNumber,
+  IsEnum,
+  Min,
+} from "class-validator";
 
 export class UpdateGoalDto {
   @IsOptional()
@@ -23,6 +30,6 @@ export class UpdateGoalDto {
   defaultPlatform?: string;
 
   @IsOptional()
-  @IsEnum(['2h', '6h', '12h', '24h'])
+  @IsEnum(["2h", "6h", "12h", "24h"])
   approvalDeadlineOffset?: string;
 }

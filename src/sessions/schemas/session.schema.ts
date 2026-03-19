@@ -1,34 +1,34 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Document, Types } from "mongoose";
 
 export type SessionDocument = Session & Document;
 
 export enum SessionStatus {
-  OPEN = 'open',
-  PENDING_APPROVAL = 'pending_approval',
-  APPROVED = 'approved',
-  IN_PROGRESS = 'in_progress',
-  COMPLETED = 'completed',
-  CANCELLED = 'cancelled',
+  OPEN = "open",
+  PENDING_APPROVAL = "pending_approval",
+  APPROVED = "approved",
+  IN_PROGRESS = "in_progress",
+  COMPLETED = "completed",
+  CANCELLED = "cancelled",
   // Legacy values kept for backward compat
-  SCHEDULED = 'scheduled',
-  NO_SHOW = 'no-show',
+  SCHEDULED = "scheduled",
+  NO_SHOW = "no-show",
 }
 
 @Schema({ timestamps: true })
 export class Session {
-  @Prop({ type: Types.ObjectId, ref: 'Goal', required: true })
+  @Prop({ type: Types.ObjectId, ref: "Goal", required: true })
   goalId: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: Types.ObjectId, ref: "User", required: true })
   goalOwnerId: Types.ObjectId;
 
   /** Nullable until an application is approved for this slot */
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: Types.ObjectId, ref: "User", default: null })
   approvedHelperId: Types.ObjectId;
 
   /** Legacy field — kept for backward compat with old session docs */
-  @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+  @Prop({ type: Types.ObjectId, ref: "User", default: null })
   partnerId: Types.ObjectId;
 
   @Prop({ default: null })

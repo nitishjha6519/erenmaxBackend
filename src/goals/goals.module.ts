@@ -1,11 +1,14 @@
-import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { GoalsController } from './goals.controller';
-import { GoalsService } from './goals.service';
-import { Goal, GoalSchema } from './schemas/goal.schema';
-import { Application, ApplicationSchema } from '../applications/schemas/application.schema';
-import { User, UserSchema } from '../users/schemas/user.schema';
-import { Session, SessionSchema } from '../sessions/schemas/session.schema';
+import { Module } from "@nestjs/common";
+import { MongooseModule } from "@nestjs/mongoose";
+import { GoalsController } from "./goals.controller";
+import { GoalsService } from "./goals.service";
+import { Goal, GoalSchema } from "./schemas/goal.schema";
+import {
+  Application,
+  ApplicationSchema,
+} from "../applications/schemas/application.schema";
+import { User, UserSchema } from "../users/schemas/user.schema";
+import { Session, SessionSchema } from "../sessions/schemas/session.schema";
 
 @Module({
   imports: [

@@ -3,28 +3,36 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
-} from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { Goal, GoalDocument, GoalStatus } from './schemas/goal.schema';
-import { Application, ApplicationDocument } from '../applications/schemas/application.schema';
-import { User, UserDocument } from '../users/schemas/user.schema';
-import { Session, SessionDocument, SessionStatus } from '../sessions/schemas/session.schema';
-import { CreateGoalDto } from './dto/create-goal.dto';
-import { UpdateGoalDto } from './dto/update-goal.dto';
+} from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model, Types } from "mongoose";
+import { Goal, GoalDocument, GoalStatus } from "./schemas/goal.schema";
+import {
+  Application,
+  ApplicationDocument,
+} from "../applications/schemas/application.schema";
+import { User, UserDocument } from "../users/schemas/user.schema";
+import {
+  Session,
+  SessionDocument,
+  SessionStatus,
+} from "../sessions/schemas/session.schema";
+import { CreateGoalDto } from "./dto/create-goal.dto";
+import { UpdateGoalDto } from "./dto/update-goal.dto";
 
 @Injectable()
 export class GoalsService {
   constructor(
     @InjectModel(Goal.name) private goalModel: Model<GoalDocument>,
-    @InjectModel(Application.name) private applicationModel: Model<ApplicationDocument>,
+    @InjectModel(Application.name)
+    private applicationModel: Model<ApplicationDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Session.name) private sessionModel: Model<SessionDocument>,
   ) {}
 
   async create(user: UserDocument, dto: CreateGoalDto) {
     if (user.totalPoints < dto.pledgedPoints) {
-      throw new BadRequestException('Insufficient points to pledge');
+      throw new BadRequestException("Insufficient points to pledge");
     }
 
     const goal = await this.goalModel.create({
@@ -35,8 +43,8 @@ export class GoalsService {
       difficulty: dto.difficulty,
       pledgedPoints: dto.pledgedPoints,
       defaultDurationMins: dto.defaultDurationMins ?? 45,
-      defaultPlatform: dto.defaultPlatform ?? 'Google Meet',
-      approvalDeadlineOffset: dto.approvalDeadlineOffset ?? '6h',
+      defaultPlatform: dto.defaultPlatform ?? "Google Meet",
+      approvalDeadlineOffset: dto.approvalDeadlineOffset ?? "6h",
       status: GoalStatus.OPEN,
       applicationsOpen: true,
     });
@@ -67,10 +75,10 @@ export class GoalsService {
     }
 
     let sort: any = { createdAt: -1 };
-    if (query.sortBy === 'points') sort = { pledgedPoints: -1 };
+    if (query.sortBy === "points") sort = { pledgedPoints: -1 };
 
-    const limit = parseInt(query.limit || '20');
-    const offset = parseInt(query.offset || '0');
+    const limit = parseInt(query.limit || "20");
+    const offset = parseInt(query.offset || "0");
 
     const [goals, total] = await Promise.all([
       this.goalModel
@@ -78,7 +86,7 @@ export class GoalsService {
         .sort(sort)
         .skip(offset)
         .limit(limit)
-        .populate('userId', 'name avatar trustScore')
+        .populate("userId", "name avatar trustScore")
         .exec(),
       this.goalModel.countDocuments(filter),
     ]);
@@ -86,23 +94,29 @@ export class GoalsService {
     const goalIds = goals.map((g) => g._id);
     const [appCounts, openSlotCounts] = await Promise.all([
       this.applicationModel.aggregate([
-        { $match: { goalId: { $in: goalIds }, status: 'pending' } },
-        { $group: { _id: '$goalId', count: { $sum: 1 } } },
+        { $match: { goalId: { $in: goalIds }, status: "pending" } },
+        { $group: { _id: "$goalId", count: { $sum: 1 } } },
       ]),
       this.sessionModel.aggregate([
         { $match: { goalId: { $in: goalIds }, status: SessionStatus.OPEN } },
-        { $group: { _id: '$goalId', count: { $sum: 1 } } },
+        { $group: { _id: "$goalId", count: { $sum: 1 } } },
       ]),
     ]);
 
-    const countMap = appCounts.reduce((acc, c) => {
-      acc[c._id.toString()] = c.count;
-      return acc;
-    }, {} as Record<string, number>);
-    const slotCountMap = openSlotCounts.reduce((acc, c) => {
-      acc[c._id.toString()] = c.count;
-      return acc;
-    }, {} as Record<string, number>);
+    const countMap = appCounts.reduce(
+      (acc, c) => {
+        acc[c._id.toString()] = c.count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    const slotCountMap = openSlotCounts.reduce(
+      (acc, c) => {
+        acc[c._id.toString()] = c.count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     let result = goals.map((g) => {
       const u = g.userId as any;
@@ -129,7 +143,7 @@ export class GoalsService {
       };
     });
 
-    if (query.has_open_slots === 'true') {
+    if (query.has_open_slots === "true") {
       result = result.filter((g) => g.openSlotCount > 0);
     }
 
@@ -143,13 +157,13 @@ export class GoalsService {
   async findOne(goalId: string, currentUserId?: string) {
     const goal = await this.goalModel
       .findById(goalId)
-      .populate('userId', 'name avatar trustScore showRate sessionsCompleted')
+      .populate("userId", "name avatar trustScore showRate sessionsCompleted")
       .exec();
-    if (!goal) throw new NotFoundException('Goal not found');
+    if (!goal) throw new NotFoundException("Goal not found");
 
     const appCount = await this.applicationModel.countDocuments({
       goalId: goal._id,
-      status: 'pending',
+      status: "pending",
     });
 
     let userApplication = null;
@@ -158,7 +172,12 @@ export class GoalsService {
         goalId: goal._id,
         applicantId: new Types.ObjectId(currentUserId),
       });
-      if (app) userApplication = { id: app._id, status: app.status, sessionId: app.sessionId };
+      if (app)
+        userApplication = {
+          id: app._id,
+          status: app.status,
+          sessionId: app.sessionId,
+        };
     }
 
     // Fetch all session slots for this goal
@@ -169,25 +188,34 @@ export class GoalsService {
       .filter((s) => s.approvedHelperId)
       .map((s) => s.approvedHelperId);
     const helpers = helperIds.length
-      ? await this.userModel.find({ _id: { $in: helperIds } }).select('name avatar trustScore').exec()
+      ? await this.userModel
+          .find({ _id: { $in: helperIds } })
+          .select("name avatar trustScore")
+          .exec()
       : [];
-    const helperMap = helpers.reduce((acc, h) => {
-      acc[h._id.toString()] = h;
-      return acc;
-    }, {} as Record<string, any>);
+    const helperMap = helpers.reduce(
+      (acc, h) => {
+        acc[h._id.toString()] = h;
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
 
     // Application counts per session
     const sessionIds = sessions.map((s) => s._id);
     const sessionAppCounts = sessionIds.length
       ? await this.applicationModel.aggregate([
-          { $match: { sessionId: { $in: sessionIds }, status: 'pending' } },
-          { $group: { _id: '$sessionId', count: { $sum: 1 } } },
+          { $match: { sessionId: { $in: sessionIds }, status: "pending" } },
+          { $group: { _id: "$sessionId", count: { $sum: 1 } } },
         ])
       : [];
-    const sessionAppMap = sessionAppCounts.reduce((acc, c) => {
-      acc[c._id.toString()] = c.count;
-      return acc;
-    }, {} as Record<string, number>);
+    const sessionAppMap = sessionAppCounts.reduce(
+      (acc, c) => {
+        acc[c._id.toString()] = c.count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     const goalOwner = goal.userId as any;
     return {
@@ -204,7 +232,8 @@ export class GoalsService {
         defaultPlatform: (goal as any).defaultPlatform,
         approvalDeadlineOffset: (goal as any).approvalDeadlineOffset,
         applicationCount: appCount,
-        openSlotCount: sessions.filter((s) => s.status === SessionStatus.OPEN).length,
+        openSlotCount: sessions.filter((s) => s.status === SessionStatus.OPEN)
+          .length,
         createdAt: goal.createdAt,
         sessions: sessions.map((s) => {
           const helperId = s.approvedHelperId?.toString();
@@ -219,7 +248,12 @@ export class GoalsService {
             meetingLink: s.meetingLink || null,
             approvalDeadline: s.approvalDeadline || null,
             approvedHelper: helper
-              ? { id: helper._id, name: helper.name, avatar: helper.avatar || null, trustScore: helper.trustScore }
+              ? {
+                  id: helper._id,
+                  name: helper.name,
+                  avatar: helper.avatar || null,
+                  trustScore: helper.trustScore,
+                }
               : null,
             appCount: sessionAppMap[s._id.toString()] || 0,
           };
@@ -239,9 +273,9 @@ export class GoalsService {
 
   async update(user: UserDocument, goalId: string, dto: UpdateGoalDto) {
     const goal = await this.goalModel.findById(goalId);
-    if (!goal) throw new NotFoundException('Goal not found');
+    if (!goal) throw new NotFoundException("Goal not found");
     if (goal.userId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not the owner of this goal');
+      throw new ForbiddenException("Not the owner of this goal");
     }
 
     const updated = await this.goalModel
@@ -252,37 +286,43 @@ export class GoalsService {
 
   async remove(user: UserDocument, goalId: string) {
     const goal = await this.goalModel.findById(goalId);
-    if (!goal) throw new NotFoundException('Goal not found');
+    if (!goal) throw new NotFoundException("Goal not found");
     if (goal.userId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not the owner of this goal');
+      throw new ForbiddenException("Not the owner of this goal");
     }
 
     const approvedApp = await this.applicationModel.findOne({
       goalId: goal._id,
-      status: 'approved',
+      status: "approved",
     });
     if (approvedApp) {
-      throw new BadRequestException('Cannot delete a goal with an approved application');
+      throw new BadRequestException(
+        "Cannot delete a goal with an approved application",
+      );
     }
 
-    await this.goalModel.findByIdAndUpdate(goalId, { $set: { status: GoalStatus.CANCELLED } });
+    await this.goalModel.findByIdAndUpdate(goalId, {
+      $set: { status: GoalStatus.CANCELLED },
+    });
 
     const pendingApps = await this.applicationModel.find({
       goalId: goal._id,
-      status: 'pending',
+      status: "pending",
     });
     for (const app of pendingApps) {
       await this.userModel.findByIdAndUpdate(app.applicantId, {
         $inc: { totalPoints: app.stakedPoints },
       });
-      await this.applicationModel.findByIdAndUpdate(app._id, { $set: { status: 'rejected' } });
+      await this.applicationModel.findByIdAndUpdate(app._id, {
+        $set: { status: "rejected" },
+      });
     }
 
     await this.userModel.findByIdAndUpdate(user._id, {
       $inc: { totalPoints: goal.pledgedPoints },
     });
 
-    return { message: 'Goal deleted successfully' };
+    return { message: "Goal deleted successfully" };
   }
 
   async createGoalSession(
@@ -298,18 +338,26 @@ export class GoalsService {
     },
   ) {
     const goal = await this.goalModel.findById(goalId);
-    if (!goal) throw new NotFoundException('Goal not found');
+    if (!goal) throw new NotFoundException("Goal not found");
     if (goal.userId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not the owner of this goal');
+      throw new ForbiddenException("Not the owner of this goal");
     }
 
     const scheduledAt = new Date(dto.scheduledDate);
-    const offsetHours: Record<string, number> = { '2h': 2, '6h': 6, '12h': 12, '24h': 24 };
-    const offsetKey = (goal as any).approvalDeadlineOffset || '6h';
+    const offsetHours: Record<string, number> = {
+      "2h": 2,
+      "6h": 6,
+      "12h": 12,
+      "24h": 24,
+    };
+    const offsetKey = (goal as any).approvalDeadlineOffset || "6h";
     const hoursBack = offsetHours[offsetKey] ?? 6;
-    const approvalDeadline = new Date(scheduledAt.getTime() - hoursBack * 60 * 60 * 1000);
+    const approvalDeadline = new Date(
+      scheduledAt.getTime() - hoursBack * 60 * 60 * 1000,
+    );
 
-    const duration = dto.durationMins ?? (goal as any).defaultDurationMins ?? 45;
+    const duration =
+      dto.durationMins ?? (goal as any).defaultDurationMins ?? 45;
     const meetingLink = dto.meetingLink ?? null;
     const endsAt = new Date(scheduledAt.getTime() + duration * 60 * 1000);
 
@@ -343,34 +391,50 @@ export class GoalsService {
     };
   }
 
-  async getMyGoals(userId: string, status: string, limit: number, offset: number) {
+  async getMyGoals(
+    userId: string,
+    status: string,
+    limit: number,
+    offset: number,
+  ) {
     const filter: any = { userId: new Types.ObjectId(userId) };
-    if (status && status !== 'all') filter.status = status;
+    if (status && status !== "all") filter.status = status;
 
     const [goals, total] = await Promise.all([
-      this.goalModel.find(filter).sort({ createdAt: -1 }).skip(offset).limit(limit).exec(),
+      this.goalModel
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(offset)
+        .limit(limit)
+        .exec(),
       this.goalModel.countDocuments(filter),
     ]);
 
     const goalIds = goals.map((g) => g._id);
     const [appCounts, openSlotCounts] = await Promise.all([
       this.applicationModel.aggregate([
-        { $match: { goalId: { $in: goalIds }, status: 'pending' } },
-        { $group: { _id: '$goalId', count: { $sum: 1 } } },
+        { $match: { goalId: { $in: goalIds }, status: "pending" } },
+        { $group: { _id: "$goalId", count: { $sum: 1 } } },
       ]),
       this.sessionModel.aggregate([
         { $match: { goalId: { $in: goalIds }, status: SessionStatus.OPEN } },
-        { $group: { _id: '$goalId', count: { $sum: 1 } } },
+        { $group: { _id: "$goalId", count: { $sum: 1 } } },
       ]),
     ]);
-    const countMap = appCounts.reduce((acc, c) => {
-      acc[c._id.toString()] = c.count;
-      return acc;
-    }, {} as Record<string, number>);
-    const slotCountMap = openSlotCounts.reduce((acc, c) => {
-      acc[c._id.toString()] = c.count;
-      return acc;
-    }, {} as Record<string, number>);
+    const countMap = appCounts.reduce(
+      (acc, c) => {
+        acc[c._id.toString()] = c.count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+    const slotCountMap = openSlotCounts.reduce(
+      (acc, c) => {
+        acc[c._id.toString()] = c.count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     return {
       goals: goals.map((g) => ({

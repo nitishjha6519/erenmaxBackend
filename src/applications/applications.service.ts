@@ -4,47 +4,63 @@ import {
   ForbiddenException,
   BadRequestException,
   ConflictException,
-} from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { Application, ApplicationDocument, ApplicationStatus } from './schemas/application.schema';
-import { Goal, GoalDocument } from '../goals/schemas/goal.schema';
-import { User, UserDocument } from '../users/schemas/user.schema';
-import { Session, SessionDocument, SessionStatus } from '../sessions/schemas/session.schema';
-import { CreateApplicationDto } from './dto/create-application.dto';
+} from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model, Types } from "mongoose";
+import {
+  Application,
+  ApplicationDocument,
+  ApplicationStatus,
+} from "./schemas/application.schema";
+import { Goal, GoalDocument } from "../goals/schemas/goal.schema";
+import { User, UserDocument } from "../users/schemas/user.schema";
+import {
+  Session,
+  SessionDocument,
+  SessionStatus,
+} from "../sessions/schemas/session.schema";
+import { CreateApplicationDto } from "./dto/create-application.dto";
 
 @Injectable()
 export class ApplicationsService {
   constructor(
-    @InjectModel(Application.name) private applicationModel: Model<ApplicationDocument>,
+    @InjectModel(Application.name)
+    private applicationModel: Model<ApplicationDocument>,
     @InjectModel(Goal.name) private goalModel: Model<GoalDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Session.name) private sessionModel: Model<SessionDocument>,
   ) {}
 
-  async applyToSession(user: UserDocument, sessionId: string, dto: CreateApplicationDto) {
+  async applyToSession(
+    user: UserDocument,
+    sessionId: string,
+    dto: CreateApplicationDto,
+  ) {
     const session = await this.sessionModel.findById(sessionId);
-    if (!session) throw new NotFoundException('Session not found');
+    if (!session) throw new NotFoundException("Session not found");
     if (
       session.status !== SessionStatus.OPEN &&
       session.status !== SessionStatus.PENDING_APPROVAL
     ) {
-      throw new BadRequestException('This session slot is not accepting applications');
+      throw new BadRequestException(
+        "This session slot is not accepting applications",
+      );
     }
 
     if (session.goalOwnerId.toString() === user._id.toString()) {
-      throw new BadRequestException('Cannot apply to your own session');
+      throw new BadRequestException("Cannot apply to your own session");
     }
 
     const existing = await this.applicationModel.findOne({
       sessionId: new Types.ObjectId(sessionId),
       applicantId: user._id,
-      status: { $in: ['pending', 'approved'] },
+      status: { $in: ["pending", "approved"] },
     });
-    if (existing) throw new ConflictException('You have already applied to this slot');
+    if (existing)
+      throw new ConflictException("You have already applied to this slot");
 
     if (user.totalPoints < dto.stakedPoints) {
-      throw new BadRequestException('Insufficient points to stake');
+      throw new BadRequestException("Insufficient points to stake");
     }
 
     let application: ApplicationDocument;
@@ -58,7 +74,8 @@ export class ApplicationsService {
         status: ApplicationStatus.PENDING,
       });
     } catch (err) {
-      if (err.code === 11000) throw new ConflictException('You have already applied to this slot');
+      if (err.code === 11000)
+        throw new ConflictException("You have already applied to this slot");
       throw err;
     }
 
@@ -78,15 +95,21 @@ export class ApplicationsService {
 
   async getGoalApplications(user: UserDocument, goalId: string) {
     const goal = await this.goalModel.findById(goalId);
-    if (!goal) throw new NotFoundException('Goal not found');
+    if (!goal) throw new NotFoundException("Goal not found");
     if (goal.userId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not the owner of this goal');
+      throw new ForbiddenException("Not the owner of this goal");
     }
 
     const applications = await this.applicationModel
       .find({ goalId: new Types.ObjectId(goalId) })
-      .populate('applicantId', 'name avatar trustScore showRate sessionsCompleted')
-      .populate('sessionId', 'topic sessionCategory scheduledAt status approvalDeadline')
+      .populate(
+        "applicantId",
+        "name avatar trustScore showRate sessionsCompleted",
+      )
+      .populate(
+        "sessionId",
+        "topic sessionCategory scheduledAt status approvalDeadline",
+      )
       .sort({ createdAt: -1 })
       .exec();
 
@@ -123,20 +146,21 @@ export class ApplicationsService {
   async approve(user: UserDocument, applicationId: string) {
     const application = await this.applicationModel
       .findById(applicationId)
-      .populate('goalId')
+      .populate("goalId")
       .exec();
-    if (!application) throw new NotFoundException('Application not found');
+    if (!application) throw new NotFoundException("Application not found");
 
     const goal = application.goalId as unknown as GoalDocument;
     if (goal.userId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not the owner of this goal');
+      throw new ForbiddenException("Not the owner of this goal");
     }
     if (application.status !== ApplicationStatus.PENDING) {
-      throw new BadRequestException('Application is no longer pending');
+      throw new BadRequestException("Application is no longer pending");
     }
 
     const sessionId = (application as any).sessionId;
-    if (!sessionId) throw new BadRequestException('Application has no associated session');
+    if (!sessionId)
+      throw new BadRequestException("Application has no associated session");
 
     await this.applicationModel.findByIdAndUpdate(applicationId, {
       $set: { status: ApplicationStatus.APPROVED },
@@ -171,7 +195,7 @@ export class ApplicationsService {
     }
 
     return {
-      application: { id: application._id, status: 'approved' },
+      application: { id: application._id, status: "approved" },
       session: {
         id: updatedSession._id,
         status: updatedSession.status,
@@ -183,16 +207,16 @@ export class ApplicationsService {
   async reject(user: UserDocument, applicationId: string) {
     const application = await this.applicationModel
       .findById(applicationId)
-      .populate('goalId')
+      .populate("goalId")
       .exec();
-    if (!application) throw new NotFoundException('Application not found');
+    if (!application) throw new NotFoundException("Application not found");
 
     const goal = application.goalId as unknown as GoalDocument;
     if (goal.userId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not the owner of this goal');
+      throw new ForbiddenException("Not the owner of this goal");
     }
     if (application.status !== ApplicationStatus.PENDING) {
-      throw new BadRequestException('Application is no longer pending');
+      throw new BadRequestException("Application is no longer pending");
     }
 
     await this.applicationModel.findByIdAndUpdate(applicationId, {
@@ -203,17 +227,19 @@ export class ApplicationsService {
       $inc: { totalPoints: application.stakedPoints },
     });
 
-    return { application: { id: application._id, status: 'rejected' } };
+    return { application: { id: application._id, status: "rejected" } };
   }
 
   async withdraw(user: UserDocument, applicationId: string) {
     const application = await this.applicationModel.findById(applicationId);
-    if (!application) throw new NotFoundException('Application not found');
+    if (!application) throw new NotFoundException("Application not found");
     if (application.applicantId.toString() !== user._id.toString()) {
-      throw new ForbiddenException('Not your application');
+      throw new ForbiddenException("Not your application");
     }
     if (application.status !== ApplicationStatus.PENDING) {
-      throw new BadRequestException('Only pending applications can be withdrawn');
+      throw new BadRequestException(
+        "Only pending applications can be withdrawn",
+      );
     }
 
     await this.applicationModel.findByIdAndUpdate(applicationId, {
@@ -224,20 +250,23 @@ export class ApplicationsService {
       $inc: { totalPoints: application.stakedPoints },
     });
 
-    return { message: 'Application withdrawn' };
+    return { message: "Application withdrawn" };
   }
 
   async getMyApplications(userId: string, type: string, status: string) {
     const filter: any = { applicantId: new Types.ObjectId(userId) };
-    if (status && status !== 'all') filter.status = status;
+    if (status && status !== "all") filter.status = status;
 
     const applications = await this.applicationModel
       .find(filter)
       .populate({
-        path: 'goalId',
-        populate: { path: 'userId', select: 'name avatar' },
+        path: "goalId",
+        populate: { path: "userId", select: "name avatar" },
       })
-      .populate('sessionId', 'topic sessionCategory scheduledAt status endsAt duration')
+      .populate(
+        "sessionId",
+        "topic sessionCategory scheduledAt status endsAt duration",
+      )
       .sort({ createdAt: -1 })
       .exec();
 
@@ -249,16 +278,23 @@ export class ApplicationsService {
       const endsAt = session?.endsAt
         ? new Date(session.endsAt)
         : session?.scheduledAt
-          ? new Date(new Date(session.scheduledAt).getTime() + (session.duration || 45) * 60 * 1000)
+          ? new Date(
+              new Date(session.scheduledAt).getTime() +
+                (session.duration || 45) * 60 * 1000,
+            )
           : null;
 
       let appType: string;
-      if (a.status === 'pending' && session?.scheduledAt && new Date(session.scheduledAt) > now) {
-        appType = 'pending';
-      } else if (a.status === 'approved' && endsAt && endsAt >= now) {
-        appType = 'upcoming';
+      if (
+        a.status === "pending" &&
+        session?.scheduledAt &&
+        new Date(session.scheduledAt) > now
+      ) {
+        appType = "pending";
+      } else if (a.status === "approved" && endsAt && endsAt >= now) {
+        appType = "upcoming";
       } else {
-        appType = 'past';
+        appType = "past";
       }
 
       return {
@@ -296,16 +332,16 @@ export class ApplicationsService {
 
     const mapped = applications.map(mapApp);
 
-    if (type && type !== 'all') {
+    if (type && type !== "all") {
       const filtered = mapped.filter((a) => a.type === type);
       return { applications: filtered, total: filtered.length };
     }
 
     return {
       applications: mapped,
-      pending: mapped.filter((a) => a.type === 'pending'),
-      upcoming: mapped.filter((a) => a.type === 'upcoming'),
-      past: mapped.filter((a) => a.type === 'past'),
+      pending: mapped.filter((a) => a.type === "pending"),
+      upcoming: mapped.filter((a) => a.type === "upcoming"),
+      past: mapped.filter((a) => a.type === "past"),
       total: mapped.length,
     };
   }

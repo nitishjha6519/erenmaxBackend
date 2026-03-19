@@ -2,28 +2,32 @@ import {
   Injectable,
   ConflictException,
   UnauthorizedException,
-} from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
-import { User, UserDocument } from '../users/schemas/user.schema';
-import { Application, ApplicationDocument } from '../applications/schemas/application.schema';
-import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
+} from "@nestjs/common";
+import { InjectModel } from "@nestjs/mongoose";
+import { Model } from "mongoose";
+import { JwtService } from "@nestjs/jwt";
+import * as bcrypt from "bcrypt";
+import { User, UserDocument } from "../users/schemas/user.schema";
+import {
+  Application,
+  ApplicationDocument,
+} from "../applications/schemas/application.schema";
+import { RegisterDto } from "./dto/register.dto";
+import { LoginDto } from "./dto/login.dto";
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
-    @InjectModel(Application.name) private applicationModel: Model<ApplicationDocument>,
+    @InjectModel(Application.name)
+    private applicationModel: Model<ApplicationDocument>,
     private jwtService: JwtService,
   ) {}
 
   async register(dto: RegisterDto) {
     const existing = await this.userModel.findOne({ email: dto.email });
     if (existing) {
-      throw new ConflictException('Email already exists');
+      throw new ConflictException("Email already exists");
     }
     const hashed = await bcrypt.hash(dto.password, 10);
     let user: UserDocument;
@@ -42,7 +46,8 @@ export class AuthService {
         badges: [],
       });
     } catch (err) {
-      if (err.code === 11000) throw new ConflictException('Email already registered');
+      if (err.code === 11000)
+        throw new ConflictException("Email already registered");
       throw err;
     }
 
@@ -61,13 +66,15 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.userModel.findOne({ email: dto.email }).select('+password');
+    const user = await this.userModel
+      .findOne({ email: dto.email })
+      .select("+password");
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException("Invalid credentials");
     }
     const valid = await bcrypt.compare(dto.password, user.password);
     if (!valid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException("Invalid credentials");
     }
     const token = this.signToken(user);
     return {
@@ -86,8 +93,8 @@ export class AuthService {
 
   async getMe(user: UserDocument) {
     const stakedResult = await this.applicationModel.aggregate([
-      { $match: { applicantId: user._id, status: 'pending' } },
-      { $group: { _id: null, total: { $sum: '$stakedPoints' } } },
+      { $match: { applicantId: user._id, status: "pending" } },
+      { $group: { _id: null, total: { $sum: "$stakedPoints" } } },
     ]);
     const stakedPoints = stakedResult.length > 0 ? stakedResult[0].total : 0;
     return {

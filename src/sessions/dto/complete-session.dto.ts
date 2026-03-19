@@ -1,4 +1,11 @@
-import { IsNumber, IsOptional, IsString, IsBoolean, Min, Max } from 'class-validator';
+import {
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsBoolean,
+  Min,
+  Max,
+} from "class-validator";
 
 export class CompleteSessionDto {
   @IsNumber()

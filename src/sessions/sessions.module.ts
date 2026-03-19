@@ -1,12 +1,18 @@
-import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { SessionsController } from './sessions.controller';
-import { SessionsService } from './sessions.service';
-import { Session, SessionSchema } from './schemas/session.schema';
-import { Goal, GoalSchema } from '../goals/schemas/goal.schema';
-import { User, UserSchema } from '../users/schemas/user.schema';
-import { TrustScoreLog, TrustScoreLogSchema } from '../users/schemas/trust-score-log.schema';
-import { Application, ApplicationSchema } from '../applications/schemas/application.schema';
+import { Module } from "@nestjs/common";
+import { MongooseModule } from "@nestjs/mongoose";
+import { SessionsController } from "./sessions.controller";
+import { SessionsService } from "./sessions.service";
+import { Session, SessionSchema } from "./schemas/session.schema";
+import { Goal, GoalSchema } from "../goals/schemas/goal.schema";
+import { User, UserSchema } from "../users/schemas/user.schema";
+import {
+  TrustScoreLog,
+  TrustScoreLogSchema,
+} from "../users/schemas/trust-score-log.schema";
+import {
+  Application,
+  ApplicationSchema,
+} from "../applications/schemas/application.schema";
 
 @Module({
   imports: [

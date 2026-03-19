@@ -1,34 +1,34 @@
-import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document, Types } from 'mongoose';
+import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
+import { Document, Types } from "mongoose";
 
 export type GoalDocument = Goal & Document;
 
 export enum GoalCategory {
-  DSA = 'dsa',
-  SYSTEM_DESIGN = 'system-design',
-  BEHAVIORAL = 'behavioral',
-  FITNESS = 'fitness',
-  SPEAKING = 'speaking',
-  OTHER = 'other',
+  DSA = "dsa",
+  SYSTEM_DESIGN = "system-design",
+  BEHAVIORAL = "behavioral",
+  FITNESS = "fitness",
+  SPEAKING = "speaking",
+  OTHER = "other",
 }
 
 export enum GoalDifficulty {
-  BEGINNER = 'beginner',
-  INTERMEDIATE = 'intermediate',
-  ADVANCED = 'advanced',
+  BEGINNER = "beginner",
+  INTERMEDIATE = "intermediate",
+  ADVANCED = "advanced",
 }
 
 export enum GoalStatus {
-  OPEN = 'open',
-  MATCHED = 'matched',
-  IN_PROGRESS = 'in-progress',
-  COMPLETED = 'completed',
-  CANCELLED = 'cancelled',
+  OPEN = "open",
+  MATCHED = "matched",
+  IN_PROGRESS = "in-progress",
+  COMPLETED = "completed",
+  CANCELLED = "cancelled",
 }
 
 @Schema({ timestamps: true })
 export class Goal {
-  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  @Prop({ type: Types.ObjectId, ref: "User", required: true })
   userId: Types.ObjectId;
 
   @Prop({ required: true })
@@ -59,10 +59,10 @@ export class Goal {
   @Prop({ default: 45 })
   defaultDurationMins: number;
 
-  @Prop({ default: 'Google Meet' })
+  @Prop({ default: "Google Meet" })
   defaultPlatform: string;
 
-  @Prop({ default: '6h', enum: ['2h', '6h', '12h', '24h'] })
+  @Prop({ default: "6h", enum: ["2h", "6h", "12h", "24h"] })
   approvalDeadlineOffset: string;
 
   createdAt: Date;
@@ -71,4 +71,4 @@ export class Goal {
 
 export const GoalSchema = SchemaFactory.createForClass(Goal);
 GoalSchema.index({ status: 1, category: 1 });
-GoalSchema.index({ title: 'text', description: 'text' });
+GoalSchema.index({ title: "text", description: "text" });

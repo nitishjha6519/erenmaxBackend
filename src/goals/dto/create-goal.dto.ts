@@ -1,5 +1,5 @@
-import { IsString, IsEnum, IsNumber, IsOptional, Min } from 'class-validator';
-import { GoalCategory, GoalDifficulty } from '../schemas/goal.schema';
+import { IsString, IsEnum, IsNumber, IsOptional, Min } from "class-validator";
+import { GoalCategory, GoalDifficulty } from "../schemas/goal.schema";
 
 export class CreateGoalDto {
   @IsString()
@@ -28,6 +28,6 @@ export class CreateGoalDto {
   defaultPlatform?: string;
 
   @IsOptional()
-  @IsEnum(['2h', '6h', '12h', '24h'])
+  @IsEnum(["2h", "6h", "12h", "24h"])
   approvalDeadlineOffset?: string;
 }
