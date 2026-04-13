@@ -76,6 +76,16 @@ export class GoalsController {
     return this.goalsService.createGoalSession(user, goalId, dto);
   }
 
+  @Patch(":goalId/cancel")
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  cancelGoal(
+    @CurrentUser() user: UserDocument,
+    @Param("goalId") goalId: string,
+  ) {
+    return this.goalsService.cancelGoal(user, goalId);
+  }
+
   @Delete(":goalId")
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)

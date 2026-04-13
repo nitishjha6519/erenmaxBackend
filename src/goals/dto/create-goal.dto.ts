@@ -1,4 +1,11 @@
-import { IsString, IsEnum, IsNumber, IsOptional, Min } from "class-validator";
+import {
+  IsString,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsDateString,
+  Min,
+} from "class-validator";
 import { GoalCategory, GoalDifficulty } from "../schemas/goal.schema";
 
 export class CreateGoalDto {
@@ -15,8 +22,14 @@ export class CreateGoalDto {
   difficulty: string;
 
   @IsNumber()
-  @Min(10)
+  @Min(50)
   pledgedPoints: number;
+
+  @IsDateString()
+  startDate: string;
+
+  @IsDateString()
+  endDate: string;
 
   @IsOptional()
   @IsNumber()
@@ -26,8 +39,4 @@ export class CreateGoalDto {
   @IsOptional()
   @IsString()
   defaultPlatform?: string;
-
-  @IsOptional()
-  @IsEnum(["2h", "6h", "12h", "24h"])
-  approvalDeadlineOffset?: string;
 }

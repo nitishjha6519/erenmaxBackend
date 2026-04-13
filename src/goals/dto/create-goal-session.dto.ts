@@ -3,6 +3,7 @@ import {
   IsNumber,
   IsDateString,
   IsOptional,
+  IsUrl,
   Min,
 } from "class-validator";
 
@@ -16,6 +17,14 @@ export class CreateGoalSessionDto {
   @IsDateString()
   scheduledDate: string;
 
+  @IsNumber()
+  @Min(1)
+  stakedPoints: number;
+
+  /** Meeting link is mandatory when posting a session topic */
+  @IsUrl()
+  meetingLink: string;
+
   /** Overrides goal.defaultDurationMins if provided */
   @IsOptional()
   @IsNumber()
@@ -26,8 +35,4 @@ export class CreateGoalSessionDto {
   @IsOptional()
   @IsString()
   platform?: string;
-
-  @IsOptional()
-  @IsString()
-  meetingLink?: string;
 }

@@ -12,6 +12,7 @@ import {
   Application,
   ApplicationDocument,
 } from "../applications/schemas/application.schema";
+import { Goal, GoalDocument } from "../goals/schemas/goal.schema";
 
 @Injectable()
 export class UsersService {
@@ -22,6 +23,7 @@ export class UsersService {
     @InjectModel(Session.name) private sessionModel: Model<SessionDocument>,
     @InjectModel(Application.name)
     private applicationModel: Model<ApplicationDocument>,
+    @InjectModel(Goal.name) private goalModel: Model<GoalDocument>,
   ) {}
 
   async getPublicProfile(userId: string) {
@@ -149,6 +151,21 @@ export class UsersService {
     ]);
     const stakedPoints = stakedResult.length > 0 ? stakedResult[0].total : 0;
 
+    // Active (open) goal for this user — there can be at most one
+    const openGoal = await this.goalModel.findOne({
+      userId,
+      status: { $nin: ["cancelled", "completed"] },
+    }).select("_id title status pledgedPoints startDate endDate").lean().exec();
+
+    // Count completed sessions for the open goal
+    let openGoalCompletedSessions = 0;
+    if (openGoal) {
+      openGoalCompletedSessions = await this.sessionModel.countDocuments({
+        goalId: openGoal._id,
+        status: "completed",
+      });
+    }
+
     // Build score breakdown from trust log
     const trustLogs = await this.trustLogModel.find({ userId }).exec();
     let sessionsPoints = 0;
@@ -183,6 +200,22 @@ export class UsersService {
         totalHoursSpent: totalHours,
         averageRating: avgRating,
       },
+      openGoal: openGoal
+        ? {
+            id: openGoal._id,
+            title: (openGoal as any).title,
+            status: (openGoal as any).status,
+            pledgedPoints: (openGoal as any).pledgedPoints,
+            startDate: (openGoal as any).startDate,
+            endDate: (openGoal as any).endDate,
+            completedSessions: openGoalCompletedSessions,
+            targetSessions: 100,
+            progressPercent: Math.min(
+              Math.round((openGoalCompletedSessions / 100) * 100),
+              100,
+            ),
+          }
+        : null,
       scoreBreakdown: {
         sessionsPoints,
         feedbackPoints,

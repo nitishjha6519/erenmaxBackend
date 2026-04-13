@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
@@ -45,13 +46,157 @@ export class SessionsService {
     );
   }
 
+  /** Lazily marks a session as deserted when the time window has passed with no owner feedback */
+  private async markDeseratedIfExpired(
+    session: SessionDocument,
+  ): Promise<SessionDocument> {
+    const activeStatuses = [
+      SessionStatus.APPROVED,
+      SessionStatus.SCHEDULED,
+      SessionStatus.IN_PROGRESS,
+    ];
+    if (!activeStatuses.includes(session.status as SessionStatus)) {
+      return session;
+    }
+    const now = new Date();
+    const endsAt = session.endsAt
+      ? new Date(session.endsAt)
+      : new Date(
+          session.scheduledAt.getTime() + (session.duration || 30) * 60 * 1000,
+        );
+    if (endsAt >= now) return session; // still within window
+    if (session.goalOwnerRating != null) return session; // owner already submitted
+
+    // Owner forfeits their staked points — no refund when session goes deserted
+
+    return this.sessionModel
+      .findByIdAndUpdate(
+        session._id,
+        { $set: { status: SessionStatus.DESERTED } },
+        { new: true },
+      )
+      .populate(
+        "goalId",
+        "title description category difficulty topic pledgedPoints",
+      )
+      .exec();
+  }
+
+  async getOpenSlots(category?: string, limit = 20, offset = 0) {
+    const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+    // Lazily close applicationOpen on sessions past the 10-min window that are not yet approved
+    await this.sessionModel.updateMany(
+      {
+        status: { $in: [SessionStatus.OPEN, SessionStatus.PENDING_APPROVAL] },
+        applicationOpen: true,
+        scheduledAt: { $lt: tenMinsAgo },
+      },
+      { $set: { applicationOpen: false } },
+    );
+
+    const openGoalIds = await this.goalModel
+      .find({ status: GoalStatus.OPEN })
+      .distinct("_id");
+
+    const filter: any = {
+      status: SessionStatus.OPEN,
+      applicationOpen: true,
+      scheduledAt: { $gte: tenMinsAgo },
+      goalId: { $in: openGoalIds },
+    };
+    if (category) filter.sessionCategory = category;
+
+    const [sessions, total] = await Promise.all([
+      this.sessionModel
+        .find(filter)
+        .sort({ scheduledAt: 1 })
+        .skip(offset)
+        .limit(limit)
+        .populate("goalId", "title category difficulty pledgedPoints userId")
+        .exec(),
+      this.sessionModel.countDocuments(filter),
+    ]);
+
+    const ownerIds = sessions.map((s) => s.goalOwnerId);
+    const owners = await this.userModel
+      .find({ _id: { $in: ownerIds } })
+      .select("name avatar trustScore")
+      .exec();
+    const ownerMap = owners.reduce(
+      (acc, o) => {
+        acc[o._id.toString()] = o;
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
+
+    const sessionIds = sessions.map((s) => s._id);
+    const appCounts = await this.applicationModel.aggregate([
+      { $match: { sessionId: { $in: sessionIds }, status: "pending" } },
+      { $group: { _id: "$sessionId", count: { $sum: 1 } } },
+    ]);
+    const appCountMap = appCounts.reduce(
+      (acc, c) => {
+        acc[c._id.toString()] = c.count;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    return {
+      sessions: sessions.map((s) => {
+        const goal = s.goalId as any;
+        const owner = ownerMap[s.goalOwnerId.toString()];
+        return {
+          id: s._id,
+          topic: s.topic,
+          category: s.sessionCategory,
+          scheduledAt: s.scheduledAt,
+          endsAt: s.endsAt,
+          duration: s.duration,
+          applicationOpen: (s as any).applicationOpen ?? true,
+          applicationCount: appCountMap[s._id.toString()] || 0,
+          ownerStakedPoints: (s as any).ownerStakedPoints || 0,
+          goal: goal
+            ? {
+                id: goal._id,
+                title: goal.title,
+                category: goal.category,
+                difficulty: goal.difficulty,
+                pledgedPoints: goal.pledgedPoints,
+              }
+            : null,
+          owner: owner
+            ? {
+                id: owner._id,
+                name: owner.name,
+                avatar: owner.avatar || null,
+                trustScore: owner.trustScore,
+              }
+            : null,
+        };
+      }),
+      total,
+      hasMore: offset + limit < total,
+    };
+  }
+
   async getOpenSessions(
     category?: string,
     from?: string,
     limit = 20,
     offset = 0,
   ) {
-    const filter: any = { status: SessionStatus.OPEN };
+    // Only surface sessions whose parent goal is still open
+    const openGoalIds = await this.goalModel
+      .find({ status: GoalStatus.OPEN })
+      .distinct("_id");
+
+    const filter: any = {
+      status: SessionStatus.OPEN,
+      goalId: { $in: openGoalIds },
+    };
     if (category) filter.sessionCategory = category;
     if (from) filter.scheduledAt = { $gte: new Date(from) };
 
@@ -167,24 +312,34 @@ export class SessionsService {
         $or: [
           // Future approved sessions: not started yet
           {
-            status: { $in: ["approved"] },
+            //status: { $in: ["approved"] },
             scheduledAt: { $gt: now },
           },
           // Live approved sessions: started but not yet ended (scheduledAt <= now < endsAt)
           {
-            status: { $in: ["approved"] },
+            // status: { $in: ["approved"] },
             scheduledAt: { $lte: now },
             endsAt: { $gte: now },
           },
           // Explicitly in-progress sessions
-          { status: SessionStatus.IN_PROGRESS },
+          //{ status: SessionStatus.IN_PROGRESS },
         ],
       });
     } else if (type === "past") {
       const now = new Date();
       conditions.push({
         $or: [
-          { status: { $in: ["completed", "no-show", "cancelled", "rejected"] } },
+          {
+            status: {
+              $in: [
+                "completed",
+                "no-show",
+                "cancelled",
+                "rejected",
+                "deserted",
+              ],
+            },
+          },
           // Approved/scheduled sessions whose end time has already passed
           {
             status: { $in: ["approved", "scheduled"] },
@@ -282,7 +437,7 @@ export class SessionsService {
 
   async getSession(user: UserDocument, sessionId: string) {
     const userId = user._id as Types.ObjectId;
-    const session = await this.sessionModel
+    let session = await this.sessionModel
       .findById(sessionId)
       .populate(
         "goalId",
@@ -296,6 +451,9 @@ export class SessionsService {
     const isHelper = helperId?.toString() === userId.toString();
     // Also allow pending applicants to view (open/pending_approval sessions are semi-public)
     if (!isOwner && !isHelper) throw new ForbiddenException("Not your session");
+
+    // Lazily mark deserted if time window expired without owner feedback
+    session = (await this.markDeseratedIfExpired(session)) as any;
 
     const [goalOwner, helper] = await Promise.all([
       this.userModel
@@ -349,6 +507,11 @@ export class SessionsService {
             }
           : null,
         isOwner,
+        feedbackSubmitted: isOwner
+          ? session.goalOwnerRating != null
+          : session.partnerRating != null,
+        goalOwnerFeedbackSubmitted: session.goalOwnerRating != null,
+        partnerFeedbackSubmitted: session.partnerRating != null,
       },
     };
   }
@@ -356,26 +519,46 @@ export class SessionsService {
   async getSessionLiveStatus(sessionId: string) {
     const session = await this.sessionModel
       .findById(sessionId)
-      .populate('goalId', 'title description category difficulty topic pledgedPoints')
+      .populate(
+        "goalId",
+        "title description category difficulty topic pledgedPoints",
+      )
       .exec();
-    if (!session) throw new NotFoundException('Session not found');
+    if (!session) throw new NotFoundException("Session not found");
 
     const now = new Date();
     const endsAt = session.endsAt
       ? new Date(session.endsAt)
-      : new Date(session.scheduledAt.getTime() + (session.duration || 45) * 60 * 1000);
+      : new Date(
+          session.scheduledAt.getTime() + (session.duration || 30) * 60 * 1000,
+        );
+
+    const bothFeedbackDone =
+      session.goalOwnerRating != null && session.partnerRating != null;
 
     const isLive =
-      session.status === SessionStatus.IN_PROGRESS ||
-      ((session.status === SessionStatus.APPROVED ||
-        (session.status as string) === 'scheduled') &&
-        session.scheduledAt <= now &&
-        endsAt >= now);
-
+      !bothFeedbackDone &&
+      // session.status === SessionStatus.IN_PROGRESS ||
+      // session.status === SessionStatus.APPROVED ||
+      // (session.status === SessionStatus.COMPLETED
+      //     &&
+      session.scheduledAt <= now &&
+      endsAt >= now;
+    console.log(
+      isLive,
+      "isLive",
+      "session.scheduledAt ",
+      session.scheduledAt,
+      endsAt,
+    );
     const [goalOwner, helper] = await Promise.all([
-      this.userModel.findById(session.goalOwnerId).select('name avatar trustScore'),
+      this.userModel
+        .findById(session.goalOwnerId)
+        .select("name avatar trustScore"),
       this.getHelperId(session)
-        ? this.userModel.findById(this.getHelperId(session)).select('name avatar trustScore')
+        ? this.userModel
+            .findById(this.getHelperId(session))
+            .select("name avatar trustScore")
         : null,
     ]);
 
@@ -390,7 +573,7 @@ export class SessionsService {
         endsAt,
         duration: session.duration,
         status: session.status,
-        meetingLink: isLive ? (session.meetingLink || null) : null,
+        meetingLink: isLive ? session.meetingLink || null : null,
         goal: goal
           ? {
               id: goal._id,
@@ -479,9 +662,10 @@ export class SessionsService {
     if (!isOwner && !isHelper) throw new ForbiddenException("Not your session");
 
     const completableStatuses = [
+      SessionStatus.OPEN,
       SessionStatus.APPROVED,
-      SessionStatus.SCHEDULED,
       SessionStatus.IN_PROGRESS,
+      SessionStatus.COMPLETED,
     ];
     if (!completableStatuses.includes(session.status as SessionStatus)) {
       throw new BadRequestException(
@@ -489,12 +673,41 @@ export class SessionsService {
       );
     }
 
+    // Enforce time window: feedback only accepted during the session slot
+    const now = new Date();
+    const endsAt = session.endsAt
+      ? new Date(session.endsAt)
+      : new Date(
+          session.scheduledAt.getTime() + (session.duration || 45) * 60 * 1000,
+        );
+    if (now < session.scheduledAt) {
+      throw new BadRequestException(
+        "Session has not started yet — feedback window is not open",
+      );
+    }
+    if (now > endsAt) {
+      throw new BadRequestException(
+        "Feedback window has closed — the session time slot has ended",
+      );
+    }
+
+    // Prevent re-submission
+    if (isOwner && session.goalOwnerRating != null) {
+      throw new ConflictException("You have already submitted your feedback");
+    }
+    if (isHelper && session.partnerRating != null) {
+      throw new ConflictException("You have already submitted your feedback");
+    }
+
     const goal = await this.goalModel.findById(session.goalId);
 
-    const updateFields: any = {
-      status: SessionStatus.COMPLETED,
-      completedAt: new Date(),
-    };
+    // Owner submitting their feedback marks the session as COMPLETED.
+    // Helper can submit during the window too, but completion is owner-driven.
+    const updateFields: any = {};
+    if (isOwner) {
+      updateFields.status = SessionStatus.COMPLETED;
+      updateFields.completedAt = new Date();
+    }
 
     if (isOwner) {
       updateFields.goalOwnerRating = dto.rating;
@@ -512,54 +725,108 @@ export class SessionsService {
       .findByIdAndUpdate(sessionId, { $set: updateFields }, { new: true })
       .exec();
 
-    let pointsEarned = 0;
-    const userId = user._id as Types.ObjectId;
+    // Auto-complete the goal once 100 sessions for it are completed
+    if (isOwner) {
+      const completedCount = await this.sessionModel.countDocuments({
+        goalId: session.goalId,
+        status: SessionStatus.COMPLETED,
+      });
+      if (completedCount >= 100) {
+        await this.goalModel.findByIdAndUpdate(session.goalId, {
+          $set: { status: GoalStatus.COMPLETED },
+        });
+      }
+    }
 
-    if (dto.partnerShowedUp) {
-      pointsEarned = 10 + Math.round((dto.rating - 1) * 3.75);
+    const userId = user._id as Types.ObjectId;
+    const pledged = goal?.pledgedPoints || 0;
+    let pointsEarned = 0;
+
+    const app = await this.applicationModel.findOne({
+      sessionId: session._id,
+      status: "approved",
+    });
+    const helperStaked = app ? app.stakedPoints : 0;
+
+    if (isOwner) {
+      const ownerStaked = (session as any).ownerStakedPoints || 0;
+
+      if (dto.partnerShowedUp) {
+        // Owner: staked returned + pledgedPoints bonus
+        pointsEarned = ownerStaked + pledged;
+        await this.userModel.findByIdAndUpdate(userId, {
+          $inc: { totalPoints: pointsEarned, sessionsCompleted: 1 },
+        });
+        await this.trustLogModel.create({
+          userId,
+          action: TrustScoreAction.SESSION_COMPLETED,
+          pointsChange: pointsEarned,
+          description:
+            "Session completed — staked points returned + goal bonus",
+          sessionId: session._id,
+        });
+
+        // Helper: only pay if they haven't submitted yet (their submission pays them directly)
+        if (helperId && session.partnerRating == null) {
+          const helperEarned = helperStaked + pledged;
+          await this.userModel.findByIdAndUpdate(helperId, {
+            $inc: { totalPoints: helperEarned, goalsHelped: 1 },
+          });
+          await this.trustLogModel.create({
+            userId: helperId,
+            action: TrustScoreAction.SESSION_COMPLETED,
+            pointsChange: helperEarned,
+            description:
+              "Session completed — staked points returned + helper bonus",
+            sessionId: session._id,
+          });
+        }
+      } else {
+        // Helper no-show — owner gets staked back only, helper forfeits staked
+        pointsEarned = ownerStaked;
+        await this.userModel.findByIdAndUpdate(userId, {
+          $inc: { totalPoints: ownerStaked, sessionsCompleted: 1 },
+        });
+        if (helperId && helperStaked > 0) {
+          await this.trustLogModel.create({
+            userId: helperId,
+            action: TrustScoreAction.NO_SHOW,
+            pointsChange: -helperStaked,
+            description: "Helper did not show up — staked points forfeited",
+            sessionId: session._id,
+          });
+        }
+      }
+    } else {
+      // Helper submission always pays out immediately — staked returned + pledgedPoints bonus.
+      // This covers both the normal case (owner completes later) and the deserted case
+      // (owner never submits, so helper gets rewarded for showing up regardless).
+      pointsEarned = helperStaked + pledged;
       await this.userModel.findByIdAndUpdate(userId, {
-        $inc: { totalPoints: pointsEarned, sessionsCompleted: 1 },
+        $inc: {
+          totalPoints: pointsEarned,
+          goalsHelped: 1,
+          sessionsCompleted: 1,
+        },
       });
       await this.trustLogModel.create({
         userId,
         action: TrustScoreAction.SESSION_COMPLETED,
         pointsChange: pointsEarned,
-        description: "Session completed with good attendance",
-        sessionId: session._id,
-      });
-
-      if (isOwner && goal) {
-        // Transfer pledgedPoints to the helper; do NOT mark goal as completed
-        await this.userModel.findByIdAndUpdate(helperId, {
-          $inc: { totalPoints: goal.pledgedPoints, goalsHelped: 1 },
-        });
-      }
-    } else {
-      const app = await this.applicationModel.findOne({
-        sessionId: session._id,
-        status: "approved",
-      });
-      const stakedPoints = app ? app.stakedPoints : 0;
-      await this.userModel.findByIdAndUpdate(userId, {
-        $inc: {
-          totalPoints: isOwner ? (goal ? goal.pledgedPoints : 0) : stakedPoints,
-        },
-      });
-      const noShowUserId = isOwner ? helperId : session.goalOwnerId;
-      await this.trustLogModel.create({
-        userId: noShowUserId,
-        action: TrustScoreAction.NO_SHOW,
-        pointsChange: -stakedPoints,
-        description: "Partner did not show up for the session",
+        description:
+          "Session completed — staked points returned + helper bonus",
         sessionId: session._id,
       });
     }
 
     return {
+      submitted: true,
       session: {
         id: updatedSession._id,
         status: updatedSession.status,
-        completedAt: updatedSession.completedAt,
+        completedAt: updatedSession.completedAt || null,
+        goalOwnerFeedbackSubmitted: updatedSession.goalOwnerRating != null,
+        partnerFeedbackSubmitted: updatedSession.partnerRating != null,
       },
       pointsEarned,
     };
@@ -601,6 +868,13 @@ export class SessionsService {
         description: "Late cancellation (< 2h before session)",
         sessionId: session._id,
       });
+      // Refund owner's staked points even on late cancel
+      const ownerStaked = (session as any).ownerStakedPoints || 0;
+      if (ownerStaked > 0) {
+        await this.userModel.findByIdAndUpdate(session.goalOwnerId, {
+          $inc: { totalPoints: ownerStaked },
+        });
+      }
       // Late cancel permanently cancels the slot
       const updated = await this.sessionModel
         .findByIdAndUpdate(
@@ -614,7 +888,13 @@ export class SessionsService {
         pointsLost,
       };
     } else {
-      // Early cancel — refund helper's staked points and reset slot to open
+      // Early cancel — refund helper's staked points and owner's staked points, reset slot to open
+      const ownerStaked = (session as any).ownerStakedPoints || 0;
+      if (ownerStaked > 0) {
+        await this.userModel.findByIdAndUpdate(session.goalOwnerId, {
+          $inc: { totalPoints: ownerStaked },
+        });
+      }
       if (helperId) {
         const app = await this.applicationModel.findOne({
           sessionId: session._id,

@@ -35,6 +35,17 @@ export class GoalsService {
       throw new BadRequestException("Insufficient points to pledge");
     }
 
+    // A user may only have one active goal at a time
+    const activeGoal = await this.goalModel.findOne({
+      userId: user._id,
+      status: { $nin: [GoalStatus.CANCELLED, GoalStatus.COMPLETED] },
+    });
+    if (activeGoal) {
+      throw new BadRequestException(
+        "You already have an active goal. Complete or cancel it before creating a new one.",
+      );
+    }
+
     const goal = await this.goalModel.create({
       userId: user._id,
       title: dto.title,
@@ -42,9 +53,10 @@ export class GoalsService {
       category: dto.category,
       difficulty: dto.difficulty,
       pledgedPoints: dto.pledgedPoints,
+      startDate: new Date(dto.startDate),
+      endDate: new Date(dto.endDate),
       defaultDurationMins: dto.defaultDurationMins ?? 45,
       defaultPlatform: dto.defaultPlatform ?? "Google Meet",
-      approvalDeadlineOffset: dto.approvalDeadlineOffset ?? "6h",
       status: GoalStatus.OPEN,
       applicationsOpen: true,
     });
@@ -181,7 +193,23 @@ export class GoalsService {
     }
 
     // Fetch all session slots for this goal
-    const sessions = await this.sessionModel.find({ goalId: goal._id }).exec();
+    // Only sessions whose scheduledAt has NOT elapsed by more than 10 minutes
+    const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+    // Lazily close applicationOpen on any OPEN/PENDING_APPROVAL sessions past the 10-min window
+    await this.sessionModel.updateMany(
+      {
+        goalId: goal._id,
+        status: { $in: [SessionStatus.OPEN, SessionStatus.PENDING_APPROVAL] },
+        applicationOpen: true,
+        scheduledAt: { $lt: tenMinsAgo },
+      },
+      { $set: { applicationOpen: false } },
+    );
+
+    const sessions = await this.sessionModel
+      .find({ goalId: goal._id, scheduledAt: { $gte: tenMinsAgo } })
+      .exec();
 
     // Resolve approvedHelper names for sessions that have one
     const helperIds = sessions
@@ -247,6 +275,7 @@ export class GoalsService {
             duration: s.duration,
             meetingLink: s.meetingLink || null,
             approvalDeadline: s.approvalDeadline || null,
+            applicationOpen: (s as any).applicationOpen ?? true,
             approvedHelper: helper
               ? {
                   id: helper._id,
@@ -282,6 +311,48 @@ export class GoalsService {
       .findByIdAndUpdate(goalId, { $set: dto }, { new: true })
       .exec();
     return { goal: updated };
+  }
+
+  async cancelGoal(user: UserDocument, goalId: string) {
+    const goal = await this.goalModel.findById(goalId);
+    if (!goal) throw new NotFoundException("Goal not found");
+    if (goal.userId.toString() !== user._id.toString()) {
+      throw new ForbiddenException("Not the owner of this goal");
+    }
+    if (
+      goal.status === GoalStatus.CANCELLED ||
+      goal.status === GoalStatus.COMPLETED
+    ) {
+      throw new BadRequestException("Goal is already finished");
+    }
+
+    // Refund pledgedPoints and reject all pending applications
+    const pendingApps = await this.applicationModel.find({
+      goalId: goal._id,
+      status: "pending",
+    });
+    for (const app of pendingApps) {
+      await this.userModel.findByIdAndUpdate(app.applicantId, {
+        $inc: { totalPoints: app.stakedPoints },
+      });
+      await this.applicationModel.findByIdAndUpdate(app._id, {
+        $set: { status: "rejected" },
+      });
+    }
+
+    await this.userModel.findByIdAndUpdate(user._id, {
+      $inc: { totalPoints: goal.pledgedPoints },
+    });
+
+    const updated = await this.goalModel
+      .findByIdAndUpdate(
+        goalId,
+        { $set: { status: GoalStatus.CANCELLED } },
+        { new: true },
+      )
+      .exec();
+
+    return { goal: { id: updated._id, status: updated.status } };
   }
 
   async remove(user: UserDocument, goalId: string) {
@@ -332,9 +403,10 @@ export class GoalsService {
       topic: string;
       category: string;
       scheduledDate: string;
+      stakedPoints: number;
+      meetingLink: string;
       durationMins?: number;
       platform?: string;
-      meetingLink?: string;
     },
   ) {
     const goal = await this.goalModel.findById(goalId);
@@ -343,23 +415,58 @@ export class GoalsService {
       throw new ForbiddenException("Not the owner of this goal");
     }
 
+    if (goal.status === GoalStatus.CANCELLED) {
+      throw new BadRequestException(
+        "Cannot create a session for a cancelled goal",
+      );
+    }
+
     const scheduledAt = new Date(dto.scheduledDate);
-    const offsetHours: Record<string, number> = {
-      "2h": 2,
-      "6h": 6,
-      "12h": 12,
-      "24h": 24,
-    };
-    const offsetKey = (goal as any).approvalDeadlineOffset || "6h";
-    const hoursBack = offsetHours[offsetKey] ?? 6;
-    const approvalDeadline = new Date(
-      scheduledAt.getTime() - hoursBack * 60 * 60 * 1000,
-    );
+    const now = new Date();
+
+    if (scheduledAt <= now) {
+      throw new BadRequestException("scheduledAt must be in the future");
+    }
+
+    if (user.totalPoints < dto.stakedPoints) {
+      throw new BadRequestException("Insufficient points to stake");
+    }
+
+    const goalStartDate = (goal as any).startDate
+      ? new Date((goal as any).startDate)
+      : null;
+    const goalEndDate = (goal as any).endDate
+      ? new Date((goal as any).endDate)
+      : null;
+    if (goalStartDate && scheduledAt < goalStartDate) {
+      throw new BadRequestException(
+        "scheduledAt is before the goal's start date",
+      );
+    }
+    if (goalEndDate && scheduledAt > goalEndDate) {
+      throw new BadRequestException("scheduledAt is after the goal's end date");
+    }
 
     const duration =
-      dto.durationMins ?? (goal as any).defaultDurationMins ?? 45;
-    const meetingLink = dto.meetingLink ?? null;
+      dto.durationMins ?? (goal as any).defaultDurationMins ?? 30;
+    const meetingLink = dto.meetingLink;
     const endsAt = new Date(scheduledAt.getTime() + duration * 60 * 1000);
+
+    // Overlap check: owner must not have another active session whose time window
+    // intersects [scheduledAt, endsAt]. Two windows overlap when:
+    //   existingStart < newEnd AND existingEnd > newStart
+    const cancelledStatuses = [SessionStatus.CANCELLED, SessionStatus.DESERTED];
+    const overlapping = await this.sessionModel.findOne({
+      goalOwnerId: user._id,
+      status: { $nin: cancelledStatuses },
+      scheduledAt: { $lt: endsAt },
+      endsAt: { $gt: scheduledAt },
+    });
+    if (overlapping) {
+      throw new BadRequestException(
+        `This time slot conflicts with another session you have scheduled (${overlapping.topic} at ${overlapping.scheduledAt.toISOString()})`,
+      );
+    }
 
     // Always create a fresh session slot — never upsert
     const session = await this.sessionModel.create({
@@ -370,10 +477,16 @@ export class GoalsService {
       endsAt,
       duration,
       meetingLink,
-      approvalDeadline,
+      approvalDeadline: null,
       topic: dto.topic,
       sessionCategory: dto.category,
+      ownerStakedPoints: dto.stakedPoints,
       status: SessionStatus.OPEN,
+    });
+
+    // Deduct staked points from owner immediately
+    await this.userModel.findByIdAndUpdate(user._id, {
+      $inc: { totalPoints: -dto.stakedPoints },
     });
 
     return {
@@ -386,6 +499,7 @@ export class GoalsService {
         approvalDeadline: session.approvalDeadline,
         duration: session.duration,
         meetingLink: session.meetingLink || null,
+        ownerStakedPoints: session.ownerStakedPoints,
         status: session.status,
       },
     };

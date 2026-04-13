@@ -22,6 +22,20 @@ import { UserDocument } from "../users/schemas/user.schema";
 export class SessionsController {
   constructor(private readonly sessionsService: SessionsService) {}
 
+  /** Public — open session slots accepting applications (within 10-min window) */
+  @Get("open-slots")
+  getOpenSlots(
+    @Query("category") category?: string,
+    @Query("limit") limit = "20",
+    @Query("offset") offset = "0",
+  ) {
+    return this.sessionsService.getOpenSlots(
+      category,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
   /** Public — powers landing page "open slots right now" feed */
   @Get("open")
   getOpenSessions(

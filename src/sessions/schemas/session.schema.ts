@@ -10,6 +10,7 @@ export enum SessionStatus {
   IN_PROGRESS = "in_progress",
   COMPLETED = "completed",
   CANCELLED = "cancelled",
+  DESERTED = "deserted",
   // Legacy values kept for backward compat
   SCHEDULED = "scheduled",
   NO_SHOW = "no-show",
@@ -85,6 +86,14 @@ export class Session {
 
   @Prop({ default: null })
   approvalDeadline: Date;
+
+  /** Points staked by the goal owner when creating this session slot */
+  @Prop({ default: 0 })
+  ownerStakedPoints: number;
+
+  /** False once scheduledAt has elapsed by more than 10 minutes — no new applications accepted */
+  @Prop({ default: true })
+  applicationOpen: boolean;
 
   createdAt: Date;
   updatedAt: Date;

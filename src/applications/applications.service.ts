@@ -38,6 +38,27 @@ export class ApplicationsService {
   ) {
     const session = await this.sessionModel.findById(sessionId);
     if (!session) throw new NotFoundException("Session not found");
+
+    // Enforce 10-minute application window only for sessions not yet approved
+    const notYetApproved =
+      session.status === SessionStatus.OPEN ||
+      session.status === SessionStatus.PENDING_APPROVAL;
+    const tenMinsAgo = new Date(Date.now() - 10 * 60 * 1000);
+    if (notYetApproved && session.scheduledAt < tenMinsAgo) {
+      // Lazily close if still marked open
+      if ((session as any).applicationOpen !== false) {
+        await this.sessionModel.findByIdAndUpdate(sessionId, {
+          $set: { applicationOpen: false },
+        });
+      }
+      throw new BadRequestException(
+        "Application window has closed — session scheduled time has elapsed by more than 10 minutes",
+      );
+    }
+    if (notYetApproved && (session as any).applicationOpen === false) {
+      throw new BadRequestException("Applications are closed for this session");
+    }
+
     if (
       session.status !== SessionStatus.OPEN &&
       session.status !== SessionStatus.PENDING_APPROVAL
@@ -63,6 +84,39 @@ export class ApplicationsService {
       throw new BadRequestException("Insufficient points to stake");
     }
 
+    // Helper time-conflict check: applicant must not already have an approved/pending
+    // session that overlaps [session.scheduledAt, session.endsAt]
+    const sessionEndsAt = session.endsAt
+      ? new Date(session.endsAt)
+      : new Date(session.scheduledAt.getTime() + (session.duration || 45) * 60 * 1000);
+
+    const conflictingAsHelper = await this.sessionModel.findOne({
+      $or: [
+        { approvedHelperId: user._id },
+        { partnerId: user._id },
+      ],
+      status: { $nin: [SessionStatus.CANCELLED, SessionStatus.DESERTED] },
+      scheduledAt: { $lt: sessionEndsAt },
+      endsAt: { $gt: session.scheduledAt },
+    });
+    if (conflictingAsHelper) {
+      throw new BadRequestException(
+        `You already have a session as helper that conflicts with this time slot (${conflictingAsHelper.topic} at ${conflictingAsHelper.scheduledAt.toISOString()})`,
+      );
+    }
+
+    const conflictingAsOwner = await this.sessionModel.findOne({
+      goalOwnerId: user._id,
+      status: { $nin: [SessionStatus.CANCELLED, SessionStatus.DESERTED] },
+      scheduledAt: { $lt: sessionEndsAt },
+      endsAt: { $gt: session.scheduledAt },
+    });
+    if (conflictingAsOwner) {
+      throw new BadRequestException(
+        `You already have a session as owner that conflicts with this time slot (${conflictingAsOwner.topic} at ${conflictingAsOwner.scheduledAt.toISOString()})`,
+      );
+    }
+
     let application: ApplicationDocument;
     try {
       application = await this.applicationModel.create({
@@ -82,13 +136,6 @@ export class ApplicationsService {
     await this.userModel.findByIdAndUpdate(user._id, {
       $inc: { totalPoints: -dto.stakedPoints },
     });
-
-    // Move session to pending_approval on first application
-    if (session.status === SessionStatus.OPEN) {
-      await this.sessionModel.findByIdAndUpdate(sessionId, {
-        $set: { status: SessionStatus.PENDING_APPROVAL },
-      });
-    }
 
     return { application };
   }

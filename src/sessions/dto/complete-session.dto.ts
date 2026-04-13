@@ -13,7 +13,6 @@ export class CompleteSessionDto {
   @Max(5)
   rating: number;
 
-  @IsOptional()
   @IsString()
   feedback?: string;
 

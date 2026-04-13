@@ -12,6 +12,7 @@ import {
   Application,
   ApplicationSchema,
 } from "../applications/schemas/application.schema";
+import { Goal, GoalSchema } from "../goals/schemas/goal.schema";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import {
       { name: TrustScoreLog.name, schema: TrustScoreLogSchema },
       { name: Session.name, schema: SessionSchema },
       { name: Application.name, schema: ApplicationSchema },
+      { name: Goal.name, schema: GoalSchema },
     ]),
   ],
   controllers: [UsersController],

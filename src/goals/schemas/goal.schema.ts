@@ -62,8 +62,11 @@ export class Goal {
   @Prop({ default: "Google Meet" })
   defaultPlatform: string;
 
-  @Prop({ default: "6h", enum: ["2h", "6h", "12h", "24h"] })
-  approvalDeadlineOffset: string;
+  @Prop({ required: true })
+  startDate: Date;
+
+  @Prop({ required: true })
+  endDate: Date;
 
   createdAt: Date;
   updatedAt: Date;
